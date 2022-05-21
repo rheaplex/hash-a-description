@@ -21,46 +21,87 @@ use std::thread;
 // We generate lots of very similar prefixes to have the best chance of
 // producing a hash that matches when we prefix a statement with them.
 
-const HASH: [&str; 6] = [
+static HASH: [&str; 11] = [
     "hash",
     "cryptographic hash",
+    "cryptographic hash digest",
     "sha256",
     "SHA256",
     "sha256 hash",
     "SHA256 hash",
+    "sha256 digest",
+    "SHA256 digest",
+    "sha256 hash digest",
+    "SHA256 hash digest",
 ];
-const HASH_ACTION: [&str; 5] = [
+static HASH_ACTION: [&str; 5] = [
     "hashing",
     "cryptographic hashing",
     "cryptographically hashing",
     "sha256 hashing",
     "SHA256 hashing",
 ];
-const SUBJECT: [&str; 4] = ["this", "this text", "this sentence", "this statement"];
-const RELATION: [&str; 3] = ["contains", "has", "includes"];
-const RESULT: [&str; 4] = ["results in", "produces", "creates", "outputs"];
-const HASH_RESULT: [&str; 5] = [
+static SUBJECT: [&str; 4] = ["this", "this text", "this sentence", "this statement"];
+//static CONTAINS_RELATION: [&str; 3] = ["contains", "has", "includes"];
+static PREFIX_RELATION: [&str; 3] = ["starts with", "begins with", "starts with a run of"];
+static SUCCESSION_RELATION: [&str; 6] = [
+    "and",
+    "then",
+    "followed by",
+    "and then",
+    "and continues with",
+    "and is followed by",
+];
+static RESULT: [&str; 4] = ["results in", "produces", "creates", "outputs"];
+static HASH_RESULT: [&str; 6] = [
     "a string",
     "a digest",
     "a hexadecimal string",
     "a message digest",
+    "a message digest value",
     "a hexadecimal message digest",
 ];
 
-//const NUMBERS: [&str; 16] = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "A", "B", "C", "D", "E", "F"];
-//const NUMBERS_PLURAL: [&str; 16] = ["zeros", "ones", "twos", "threes", "fours", "fives", "sixes", "sevens", "eights", "nines", "As", "Bs", "Cs", "Ds", "Es", "Fs"];
+static NUMBERS: [&str; 16] = [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "A", "B", "C",
+    "D", "E", "F",
+];
+static NUMBERS_PLURAL: [&str; 16] = [
+    "zeros", "ones", "twos", "threes", "fours", "fives", "sixes", "sevens", "eights", "nines",
+    "As", "Bs", "Cs", "Ds", "Es", "Fs",
+];
+
+fn number_word(number: u8, count: u8) -> &'static str {
+    if count == 1 {
+        return NUMBERS[number as usize];
+    } else {
+        return NUMBERS_PLURAL[number as usize];
+    }
+}
+
+fn gen_descriptions(digit: u8, quantity: u8) -> Vec<String> {
+    let digit_plural = if quantity == 1 { "" } else { "s" };
+    let digit_word = number_word(digit, quantity);
+    let quantity_word = NUMBERS[quantity as usize];
+    let mut descs = Vec::new();
+    descs.push(format!("{} {:x}{}", quantity, digit, &digit_plural));
+    descs.push(format!("{} {:x}{}", quantity_word, digit, &digit_plural));
+    descs.push(format!("{} {}", quantity, digit_word));
+    descs.push(format!("{} {}", quantity_word, digit_word));
+    return descs;
+}
 
 fn initial_cap(text: &str) -> String {
     let result = String::from(&text[..1]).to_uppercase();
     return result + &text[1..];
 }
 
-fn gen_prefixes() -> Vec<String> {
+fn gen_prefixes(relations: &[&str]) -> Vec<String> {
     let mut prefixes = Vec::new();
     // e.g. "the sha256 hash of this text includes"
     for hash in HASH {
         for subject in SUBJECT {
-            for relation in RELATION {
+            for relation in relations {
                 let prefix = format!("the {} of {} {}", hash, subject, relation);
                 prefixes.push(initial_cap(&prefix));
                 prefixes.push(prefix);
@@ -72,7 +113,7 @@ fn gen_prefixes() -> Vec<String> {
         for subject in SUBJECT {
             for result in RESULT {
                 for hash_result in HASH_RESULT {
-                    for relation in RELATION {
+                    for relation in relations {
                         let prefix = format!(
                             "{} {} {} {} that {}",
                             hash_action, subject, result, hash_result, relation
@@ -111,7 +152,7 @@ fn maybe_find_feature(feature: &str, matcher: &Regex, prefixes: &Vec<String>) {
 
 // Look for the described feature, using the provided matcher,
 // matching AT LEAST count times, fuzzing with prefixes
-
+/*
 fn maybe_find_feature_count(feature: &str, matcher: &Regex, count: usize, prefixes: &Vec<String>) {
     for prefix in prefixes {
         let description = format!("{} {}", prefix, feature);
@@ -208,12 +249,61 @@ fn maybe_find_n_and_m_successive(prefixes: &Arc<Vec<String>>) {
             }
         }
     }
+}*/
+
+fn find_prefixes_of_length() {
+    let prefixes = Arc::new(gen_prefixes(&PREFIX_RELATION));
+    for digit in 0..15 {
+        for count in 3..15 {
+            let matcher = Regex::new(format!(r"^{:x}{{{},}}", digit, count).as_str());
+            let descriptions = gen_descriptions(digit, count);
+            for desc in descriptions {
+                let p = prefixes.clone();
+                let m = matcher.clone();
+                thread::spawn(move || {
+                    maybe_find_feature(&desc, &m.unwrap(), &p);
+                });
+            }
+        }
+    }
+}
+
+fn find_two_prefixes_of_length() {
+    let prefixes = Arc::new(gen_prefixes(&PREFIX_RELATION));
+    for digit1 in 0..15 {
+        for count1 in 3..15 {
+            for digit2 in 0..15 {
+                if digit2 != digit1 {
+                    for count2 in 2..15 {
+                        let matcher = Regex::new(
+                            format!(r"^{:x}{{{},}}{:x}{{{},}}", digit1, count1, digit2, count2)
+                                .as_str(),
+                        );
+                        let p = prefixes.clone();
+                        thread::spawn(move || {
+                            let d1s = gen_descriptions(digit1, count1);
+                            let d2s = gen_descriptions(digit2, count2);
+                            for d1 in d1s {
+                                for d2 in &d2s {
+                                    for rel in SUCCESSION_RELATION {
+                                        let desc = format!("{} {} {}", d1, rel, d2);
+                                        maybe_find_feature(&desc, &matcher.clone().unwrap(), &p);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn main() {
-    let prefixes = Arc::new(gen_prefixes());
-    maybe_find_more_than_one(&prefixes);
+    /*maybe_find_more_than_one(&prefixes);
     maybe_find_n(&prefixes);
     maybe_find_n_successive(&prefixes);
-    maybe_find_n_and_m_successive(&prefixes);
+    maybe_find_n_and_m_successive(&prefixes);*/
+    find_prefixes_of_length();
+    find_two_prefixes_of_length();
 }
